@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:shelf/shelf.dart' as shelf;
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart' as shelf_router;
+import 'cyberpunk_theme.dart';
 
 const String kGitHubReleasesUrl =
     'https://github.com/ZenithObscure/Project-Zenith/releases/latest';
@@ -81,21 +82,11 @@ class _MyAppState extends State<MyApp> {
               return MaterialApp(
                 title: 'Project Zenith',
                 debugShowCheckedModeBanner: false,
-                themeMode:
-                    controller.darkMode ? ThemeMode.dark : ThemeMode.light,
-                theme: ThemeData(
-                  colorScheme:
-                      ColorScheme.fromSeed(seedColor: controller.seedColor),
-                  useMaterial3: true,
+                themeMode: ThemeMode.dark,
+                theme: buildCyberpunkTheme(),
+                home: cyberpunkBackground(
+                  child: const AuthGate(),
                 ),
-                darkTheme: ThemeData(
-                  colorScheme: ColorScheme.fromSeed(
-                    seedColor: controller.seedColor,
-                    brightness: Brightness.dark,
-                  ),
-                  useMaterial3: true,
-                ),
-                home: const AuthGate(),
               );
             },
           ),
