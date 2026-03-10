@@ -12,6 +12,9 @@ import 'package:shelf_router/shelf_router.dart' as shelf_router;
 
 const String kGitHubReleasesUrl =
     'https://github.com/ZenithObscure/Project-Zenith/releases/latest';
+const String kGitHubApiReleasesUrl =
+    'https://api.github.com/repos/ZenithObscure/Project-Zenith/releases/latest';
+const String kCurrentVersion = '0.1.0';
 const String kDefaultLocalLlmEndpoint = String.fromEnvironment(
   'ZENITH_LOCAL_LLM_ENDPOINT',
   defaultValue: 'http://127.0.0.1:11434',
@@ -165,6 +168,10 @@ class AppController extends ChangeNotifier {
   String localLlmStatus = 'Not checked';
   bool isRefreshingLocalModels = false;
   List<String> availableLocalLlmModels = [];
+
+  // Update checker
+  String? latestVersion;
+  DateTime? lastVersionCheck;
 
   bool albumAutoBackup = true;
   bool driveSyncEnabled = true;
@@ -460,6 +467,52 @@ class AppController extends ChangeNotifier {
     savedFidusChats.removeAt(index);
     _save();
     notifyListeners();
+  }
+
+  Future<void> checkForUpdates() async {
+    // Only check once per 6 hours
+    if (lastVersionCheck != null &&
+        DateTime.now().difference(lastVersionCheck!) < const Duration(hours: 6)) {
+      return;
+    }
+
+    try {
+      final response = await http.get(
+        Uri.parse(kGitHubApiReleasesUrl),
+        headers: {'Accept': 'application/vnd.github.v3+json'},
+      ).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final tagName = data['tag_name'] as String?;
+        if (tagName != null) {
+          // Extract version from tag (e.g., "v0.2.0" -> "0.2.0")
+          final version = tagName.startsWith('v') ? tagName.substring(1) : tagName;
+          latestVersion = version;
+          lastVersionCheck = DateTime.now();
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      // Silent fail - update check is non-critical
+    }
+  }
+
+  bool get hasUpdate {
+    if (latestVersion == null) return false;
+    return _compareVersions(latestVersion!, kCurrentVersion) > 0;
+  }
+
+  int _compareVersions(String v1, String v2) {
+    final parts1 = v1.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+    final parts2 = v2.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+    for (int i = 0; i < 3; i++) {
+      final p1 = i < parts1.length ? parts1[i] : 0;
+      final p2 = i < parts2.length ? parts2[i] : 0;
+      if (p1 > p2) return 1;
+      if (p1 < p2) return -1;
+    }
+    return 0;
   }
 
   void setThemeColor(Color color) {
@@ -954,8 +1007,22 @@ class _SignInPageState extends State<SignInPage> {
   }
 }
 
-class ZenithHomePage extends StatelessWidget {
+class ZenithHomePage extends StatefulWidget {
   const ZenithHomePage({super.key});
+
+  @override
+  State<ZenithHomePage> createState() => _ZenithHomePageState();
+}
+
+class _ZenithHomePageState extends State<ZenithHomePage> {
+  @override
+  void initState() {
+    super.initState();
+    // Check for updates when home page opens
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ZenithScope.of(context).checkForUpdates();
+    });
+  }
 
   Future<void> _openGitHubUpdates() async {
     final uri = Uri.parse(kGitHubReleasesUrl);
@@ -976,10 +1043,16 @@ class ZenithHomePage extends StatelessWidget {
             icon: const Icon(Icons.logout),
             tooltip: 'Sign out',
           ),
-          IconButton(
-            onPressed: _openGitHubUpdates,
-            icon: const Icon(Icons.update),
-            tooltip: 'Check for updates on GitHub',
+          Badge(
+            isLabelVisible: app.hasUpdate,
+            label: const Text('New'),
+            child: IconButton(
+              onPressed: _openGitHubUpdates,
+              icon: const Icon(Icons.update),
+              tooltip: app.hasUpdate
+                  ? 'Update available: v${app.latestVersion}'
+                  : 'Check for updates on GitHub',
+            ),
           ),
         ],
       ),
@@ -1127,6 +1200,7 @@ class _FidusPanelState extends State<FidusPanel> {
     ),
   ];
   bool _isThinking = false;
+  bool _showSidepanel = true;
 
   @override
   void dispose() {
@@ -1216,217 +1290,281 @@ class _FidusPanelState extends State<FidusPanel> {
     final app = ZenithScope.of(context);
     
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Fidus the Cat', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Powered by ${app.localLlmModel}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-                Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      tooltip: 'Clear conversation',
-                      onPressed: _messages.length > 1 ? _clearConversation : null,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Helpful AI companion for planning and routing tasks across Zenith.',
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _quickPrompts
-                  .map(
-                    (prompt) => ActionChip(
-                      label: Text(prompt),
-                      onPressed: _isThinking
-                          ? null
-                          : () {
-                              _promptCtrl.text = prompt;
-                              _sendPrompt();
-                            },
-                    ),
-                  )
-                  .toList(),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _chatTitleCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Chat title',
-                      hintText: 'Sprint planning',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: _messages.length > 1 ? _saveCurrentChat : null,
-                  icon: const Icon(Icons.save_outlined),
-                  label: const Text('Save Chat'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            if (app.savedFidusChats.isNotEmpty) ...[
-              const Text(
-                'Saved Chats',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 170),
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: app.savedFidusChats.length,
-                  itemBuilder: (context, index) {
-                    final session = app.savedFidusChats[index];
-                    return ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.chat_bubble_outline),
-                      title: Text(session.title),
-                      subtitle: Text(
-                        '${session.messages.length} messages • ${session.createdAt.toLocal()}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline),
-                        onPressed: () => app.deleteFidusChat(index),
-                      ),
-                      onTap: () => _loadSavedChat(session),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 400),
-              child: Container(
-                decoration: BoxDecoration(
-                  border: Border.all(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Left sidepanel: saved chats
+          if (_showSidepanel)
+            Container(
+              width: 240,
+              decoration: BoxDecoration(
+                border: Border(
+                  right: BorderSide(
                     color: Theme.of(context).colorScheme.outlineVariant,
                   ),
-                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.all(12),
-                  itemCount: _messages.length + (_isThinking ? 1 : 0),
-                  itemBuilder: (context, index) {
-                    if (index == _messages.length) {
-                      // Show thinking indicator
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Row(
-                          children: [
-                            SizedBox(
-                              height: 16,
-                              width: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Theme.of(context).colorScheme.primary,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Saved Chats',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.add, size: 20),
+                          tooltip: 'New chat',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: _clearConversation,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: app.savedFidusChats.isEmpty
+                        ? const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Text(
+                                'No saved chats yet',
+                                style: TextStyle(color: Colors.grey),
+                                textAlign: TextAlign.center,
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            const Text('Fidus is thinking...'),
-                          ],
-                        ),
-                      );
-                    }
-                    
-                    final msg = _messages[index];
-                    final fromUser = msg.role == FidusRole.user;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Align(
-                        alignment:
-                            fromUser ? Alignment.centerRight : Alignment.centerLeft,
-                        child: Container(
-                          constraints: const BoxConstraints(maxWidth: 560),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: fromUser
-                                ? Theme.of(context).colorScheme.primaryContainer
-                                : Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainerHigh,
-                            borderRadius: BorderRadius.circular(12),
+                          )
+                        : ListView.builder(
+                            itemCount: app.savedFidusChats.length,
+                            itemBuilder: (context, index) {
+                              final session = app.savedFidusChats[index];
+                              return ListTile(
+                                dense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 4,
+                                ),
+                                leading: const Icon(Icons.chat_bubble_outline, size: 18),
+                                title: Text(
+                                  session.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 13),
+                                ),
+                                subtitle: Text(
+                                  '${session.messages.length} msgs',
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                                trailing: IconButton(
+                                  icon: const Icon(Icons.delete_outline, size: 16),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  onPressed: () {
+                                    setState(() {
+                                      app.deleteFidusChat(index);
+                                    });
+                                  },
+                                ),
+                                onTap: () => _loadSavedChat(session),
+                              );
+                            },
                           ),
-                          child: SelectableText(
-                            msg.text,
-                            style: TextStyle(
-                              color: fromUser
-                                  ? Theme.of(context).colorScheme.onPrimaryContainer
-                                  : Theme.of(context).colorScheme.onSurface,
-                            ),
+                  ),
+                ],
+              ),
+            ),
+          // Main chat area
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Fidus the Cat', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Powered by ${app.localLlmModel}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: Icon(_showSidepanel ? Icons.chevron_left : Icons.chevron_right),
+                            tooltip: _showSidepanel ? 'Hide sidebar' : 'Show sidebar',
+                            onPressed: () => setState(() => _showSidepanel = !_showSidepanel),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            tooltip: 'Clear conversation',
+                            onPressed: _messages.length > 1 ? _clearConversation : null,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Helpful AI companion for planning and routing tasks across Zenith.',
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _quickPrompts
+                        .map(
+                          (prompt) => ActionChip(
+                            label: Text(prompt),
+                            onPressed: _isThinking
+                                ? null
+                                : () {
+                                    _promptCtrl.text = prompt;
+                                    _sendPrompt();
+                                  },
+                          ),
+                        )
+                        .toList(),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _chatTitleCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Chat title',
+                            hintText: 'Sprint planning',
+                            border: OutlineInputBorder(),
                           ),
                         ),
                       ),
-                    );
-                  },
-                ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        onPressed: _messages.length > 1 ? _saveCurrentChat : null,
+                        icon: const Icon(Icons.save_outlined),
+                        label: const Text('Save Chat'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.outlineVariant,
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.all(12),
+                        itemCount: _messages.length + (_isThinking ? 1 : 0),
+                        itemBuilder: (context, index) {
+                          if (index == _messages.length) {
+                            // Show thinking indicator
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    height: 16,
+                                    width: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Theme.of(context).colorScheme.primary,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Text('Fidus is thinking...'),
+                                ],
+                              ),
+                            );
+                          }
+                          
+                          final msg = _messages[index];
+                          final fromUser = msg.role == FidusRole.user;
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: Align(
+                              alignment:
+                                  fromUser ? Alignment.centerRight : Alignment.centerLeft,
+                              child: Container(
+                                constraints: const BoxConstraints(maxWidth: 560),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: fromUser
+                                      ? Theme.of(context).colorScheme.primaryContainer
+                                      : Theme.of(context)
+                                          .colorScheme
+                                          .surfaceContainerHigh,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: SelectableText(
+                                  msg.text,
+                                  style: TextStyle(
+                                    color: fromUser
+                                        ? Theme.of(context).colorScheme.onPrimaryContainer
+                                        : Theme.of(context).colorScheme.onSurface,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _promptCtrl,
+                          minLines: 1,
+                          maxLines: 3,
+                          enabled: !_isThinking,
+                          decoration: InputDecoration(
+                            hintText: 'Ask Fidus to plan a task...',
+                            border: const OutlineInputBorder(),
+                            suffixIcon: _isThinking 
+                              ? const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                )
+                              : null,
+                          ),
+                          onSubmitted: (_) => _sendPrompt(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton.icon(
+                        onPressed: _isThinking ? null : _sendPrompt,
+                        icon: const Icon(Icons.send),
+                        label: const Text('Send'),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _promptCtrl,
-                    minLines: 1,
-                    maxLines: 3,
-                    enabled: !_isThinking,
-                    decoration: InputDecoration(
-                      hintText: 'Ask Fidus to plan a task...',
-                      border: const OutlineInputBorder(),
-                      suffixIcon: _isThinking 
-                        ? const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          )
-                        : null,
-                    ),
-                    onSubmitted: (_) => _sendPrompt(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                FilledButton.icon(
-                  onPressed: _isThinking ? null : _sendPrompt,
-                  icon: const Icon(Icons.send),
-                  label: const Text('Send'),
-                ),
-              ],
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
