@@ -1,0 +1,12 @@
+name: zenith_account_server
+description: Prototype account server for Zenith token/reward system.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  crypto: ^3.0.6
+  shelf: ^1.4.2
+  shelf_router: ^1.1.4

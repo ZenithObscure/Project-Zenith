@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zenith Account</title>
+    <style>
+      :root {
+        --bg: #0e1726;
+        --panel: #152238;
+        --text: #f5f7fb;
+        --muted: #95a6c7;
+        --accent: #32c48d;
+        --danger: #ff6b6b;
+      }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: radial-gradient(circle at top right, #1f3155, var(--bg));
+        color: var(--text);
+      }
+      .container {
+        max-width: 760px;
+        margin: 3rem auto;
+        padding: 0 1rem;
+      }
+      .card {
+        background: color-mix(in srgb, var(--panel) 92%, #ffffff 8%);
+        border: 1px solid #2a3d5f;
+        border-radius: 14px;
+        padding: 1.25rem;
+        margin-bottom: 1rem;
+      }
+      h1 {
+        margin: 0 0 0.5rem;
+      }
+      p {
+        color: var(--muted);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+      }
+      label {
+        display: block;
+        margin-bottom: 0.5rem;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 0.3rem;
+        border-radius: 10px;
+        border: 1px solid #415a84;
+        background: #0f1b31;
+        color: var(--text);
+        padding: 0.7rem;
+      }
+      button {
+        margin-top: 0.8rem;
+        width: 100%;
+        border: none;
+        border-radius: 10px;
+        padding: 0.75rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .primary {
+        background: var(--accent);
+        color: #092b1d;
+      }
+      .secondary {
+        background: #3e8ef7;
+        color: #fff;
+      }
+      #status {
+        min-height: 1.4rem;
+      }
+      .ok {
+        color: var(--accent);
+      }
+      .err {
+        color: var(--danger);
+      }
+      code {
+        word-break: break-all;
+      }
+      @media (max-width: 700px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <h1>Zenith Account Portal</h1>
+        <p>Create your account here, then use the same email/password in the Zenith app login screen.</p>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>Create Account</h3>
+          <label>Email <input id="regEmail" type="email" /></label>
+          <label>Password <input id="regPassword" type="password" /></label>
+          <button class="primary" id="registerBtn">Register</button>
+        </div>
+
+        <div class="card">
+          <h3>Login</h3>
+          <label>Email <input id="loginEmail" type="email" /></label>
+          <label>Password <input id="loginPassword" type="password" /></label>
+          <button class="secondary" id="loginBtn">Login</button>
+          <button class="secondary" id="forgotBtn">Forgot Password</button>
+          <p style="font-size: 0.9rem; margin-top: 0.6rem;">
+            Forgot-password is enabled as a prototype flow.
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div id="status"></div>
+        <p>Last token:</p>
+        <code id="token">(none)</code>
+        <p id="sessionInfo">Not signed in yet.</p>
+        <button class="secondary" id="checkMeBtn">Check My Account</button>
+      </div>
+    </div>
+
+    <script>
+      const statusEl = document.getElementById('status');
+      const tokenEl = document.getElementById('token');
+      const sessionInfoEl = document.getElementById('sessionInfo');
+      const storageKey = 'zenithPortalToken';
+
+      function setToken(token) {
+        if (!token) {
+          localStorage.removeItem(storageKey);
+          tokenEl.textContent = '(none)';
+          sessionInfoEl.textContent = 'Not signed in yet.';
+          return;
+        }
+
+        localStorage.setItem(storageKey, token);
+        tokenEl.textContent = token;
+      }
+
+      function getToken() {
+        return localStorage.getItem(storageKey) || '';
+      }
+
+      function showStatus(msg, ok) {
+        statusEl.textContent = msg;
+        statusEl.className = ok ? 'ok' : 'err';
+      }
+
+      async function post(path, payload) {
+        const res = await fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        return data;
+      }
+
+      document.getElementById('registerBtn').onclick = async () => {
+        try {
+          const data = await post('/api/register', {
+            email: document.getElementById('regEmail').value,
+            password: document.getElementById('regPassword').value,
+          });
+          setToken(data.token);
+          sessionInfoEl.textContent = `Signed in as ${data.email}`;
+          showStatus(`Account created for ${data.email}. Balance: ${data.rewardBalance}`, true);
+        } catch (e) {
+          showStatus(e.message, false);
+        }
+      };
+
+      document.getElementById('loginBtn').onclick = async () => {
+        try {
+          const data = await post('/api/login', {
+            email: document.getElementById('loginEmail').value,
+            password: document.getElementById('loginPassword').value,
+          });
+          setToken(data.token);
+          sessionInfoEl.textContent = `Signed in as ${data.email}`;
+          showStatus(`Logged in as ${data.email}. Balance: ${data.rewardBalance}`, true);
+        } catch (e) {
+          showStatus(e.message, false);
+        }
+      };
+
+      document.getElementById('forgotBtn').onclick = async () => {
+        const email = document.getElementById('loginEmail').value.trim();
+        if (!email) {
+          showStatus('Enter your account email in the Login form first.', false);
+          return;
+        }
+
+        try {
+          const data = await post('/api/forgot-password', { email });
+          showStatus(data.message || 'Reset requested.', true);
+        } catch (e) {
+          showStatus(e.message, false);
+        }
+      };
+
+      document.getElementById('checkMeBtn').onclick = async () => {
+        const token = getToken();
+        if (!token) {
+          showStatus('No token available. Please register or log in first.', false);
+          return;
+        }
+
+        try {
+          const res = await fetch('/api/me', {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+          sessionInfoEl.textContent = `Signed in as ${data.email} | Balance: ${data.rewardBalance}`;
+          showStatus('Account verified.', true);
+        } catch (e) {
+          showStatus(e.message, false);
+        }
+      };
+
+      setToken(getToken());
+    </script>
+  </body>
+</html>

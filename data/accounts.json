@@ -1,0 +1,9 @@
+[
+  {
+    "email": "proto-user@zenith.dev",
+    "passwordSalt": "-OMJRWgo2Spdzevu0IX6gw==",
+    "passwordHash": "1649a0cd53fe2d1cade3af93eef2c27ed39779b3b832b57ed5621cc47791dd53",
+    "createdAt": "2026-03-10T05:20:27.379452Z",
+    "rewardBalance": 0
+  }
+]
